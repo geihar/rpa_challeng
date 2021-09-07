@@ -1,23 +1,32 @@
-import time
 import os
+import glob
+import logging
+import shutil
 
 from RPA.Browser.Selenium import Selenium
 from RPA.Excel.Files import Files
 from RPA.Tables import Tables
-
+from RPA.PDF import PDF
+from RPA.FileSystem import FileSystem
 
 browser = Selenium()
 excel = Files()
 tables = Tables()
+pdf = PDF()
+system = FileSystem()
 
 agency = 'Department of Commerce'
 path = os.path.dirname(os.path.abspath(__file__))
-source_pdf = os.path.join(path, 'output/')
+source_output = os.path.join(path, 'output/')
 source_excel = os.path.join(path, 'output/collected_data.xlsx')
+
+logfile = source_output + '/log_file.log'
+logging.basicConfig(level=logging.ERROR, filename=logfile)
+logger = logging.getLogger(__name__)
 
 
 def get_data_from_dive_in():
-    browser.set_download_directory(source_pdf)
+    browser.set_download_directory(source_output)
     browser.open_available_browser("https://itdashboard.gov/")
     browser.click_link('xpath://*[@id="node-23"]/div/div/div/div/div/div/div/a')
     browser.wait_until_element_is_visible('xpath://*[@id="agency-tiles-widget"]/div')
@@ -74,27 +83,57 @@ def get_individual_investments_data():
     return [dict(zip(cols, i)) for i in table_data]
 
 
-def save_files():
+def save_files(data: list):
     link_count = browser.get_element_count('xpath://*[@id="investments-table-object"]/tbody/tr/td/a')
     link_list = []
     for i in range(1, link_count + 1):
         link = browser.get_element_attribute(f'xpath:// *[@id="investments-table-object"]/tbody/tr[{i}]/td[1]/a',
                                              'href')
-        link_list.append(link)
+        link_list.append({'link': link, 'index': i})
     for i in link_list:
-        browser.go_to(i)
+        browser.go_to(i['link'])
         browser.wait_until_element_is_visible('xpath://*[@id="business-case-pdf"]/a', timeout=30)
         browser.click_element('xpath://*[@id="business-case-pdf"]/a')
-        time.sleep(5)
+        file_path = source_output + data[i['index']]['UII'] + '.pdf'
+        system.wait_until_created(file_path, timeout=60)
+        check_files(data=data[i['index']])
+
+
+def check_files(data: dict):
+    files = glob.glob(source_output + '*.pdf')
+    last_file = max(files, key=os.path.getctime)
+    file = pdf.get_text_from_pdf(last_file)
+    section_a = file[1][file[1].find('Section A'): file[1].find('Section B')].strip()
+    uii = section_a[section_a.find('(UII):'):].split(': ')[1]
+    name_of_invest = section_a[
+                     section_a.find('Name of this Investment:'): section_a.find('2. Unique ')
+                     ].split(': ')[1].replace("\n", "")
+
+    if uii != data['UII'] or name_of_invest != data['Investment Title']:
+        massage = f'A file named {os.path.basename(last_file)}.pdf has partials with table entries'
+        logger.error(msg=massage)
+
+
+def clean_folder(folder):
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            logger.error(f'Failed to delete {file_path}. Reason: {e}')
 
 
 def main():
     try:
+        clean_folder(source_output)
         clean_text = get_data_from_dive_in()
         save_excel(clean_text)
         ii_data = get_individual_investments_data()
         save_individual_investments(data=ii_data)
-        save_files()
+        save_files(data=ii_data)
 
     finally:
         browser.close_all_browsers()
