@@ -20,9 +20,10 @@ path = os.path.dirname(os.path.abspath(__file__))
 source_output = os.path.join(path, 'output/')
 source_excel = os.path.join(path, 'output/collected_data.xlsx')
 
-logfile = source_output + '/log_file.log'
+logfile = source_output + 'log_file.log'
 logging.basicConfig(level=logging.ERROR, filename=logfile)
 logger = logging.getLogger(__name__)
+logging.getLogger("pdfminer").setLevel(logging.WARNING)
 
 
 def get_data_from_dive_in():
@@ -110,13 +111,13 @@ def check_files(data: dict):
                      ].split(': ')[1].replace("\n", "")
 
     if uii != data['UII'] or name_of_invest != data['Investment Title']:
-        massage = f'A file named {os.path.basename(last_file)}.pdf has partials with table entries'
+        massage = f'A file named {os.path.basename(last_file)} has partials with table entries'
         logger.error(msg=massage)
 
 
 def clean_folder(folder):
-    for filename in os.listdir(folder):
-        file_path = os.path.join(folder, filename)
+    files_path = glob.glob(folder + '*.pdf')
+    for file_path in files_path:
         try:
             if os.path.isfile(file_path) or os.path.islink(file_path):
                 os.unlink(file_path)
